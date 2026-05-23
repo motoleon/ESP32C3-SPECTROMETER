@@ -1,3 +1,3 @@
 # ESP32C3-SPECTROMETER
 IN PROCESS...
-With a simple ESP32 C3, its tiny 0.42-inch OLED screen (it's super mini), and an IMMP441 microphone (or a Chinese copy), I built a spectrograph (frequency spectrum analyzer) with n bands from 20 Hz to 20 kHz. It seems incredible that this C3 can calculate FFTs at 44 kHz... but it can, and in real time. All of this is done using ESP Home.
+With a simple ESP32 C3, its tiny 0.42-inch OLED screen (it's super mini), and an IMMP441 microphone (or a Chinese copy), I built a spectrograph (frequency spectrum analyzer) with n bands from 20 Hz to 20 kHz. It seems incredible that this C3 can calculate FFTs at 44 kHz... but it can, and in real time. It's not emulated, it's not an approximation; the bands you configure are the bands it actually responds to in terms of frequency. It truly analyzes the spectrum. All of this is done using ESP Home and Home Assistant, and a library I had to develop in C++ to make it as powerful as possible.
