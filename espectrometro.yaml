@@ -1,0 +1,177 @@
+esphome:
+  name: espectrometro
+  friendly_name: ESPECTROMETRO
+
+esp32:
+  variant: esp32c3
+  framework:
+    type: esp-idf
+
+api:
+  reboot_timeout: 0s
+
+logger:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  power_save_mode: HIGH
+  fast_connect: true
+  manual_ip:
+    static_ip: 192.168.0.204
+    gateway: 192.168.0.1
+    subnet: 255.255.255.0
+    dns1: 8.8.8.8
+    dns2: 8.8.4.4
+
+network:
+  enable_ipv6: false
+
+globals:
+  - id: display_mode
+    type: int
+    restore_value: yes
+    initial_value: '0'
+
+external_components:
+  - source:
+      type: local
+      path: my_components
+    components: [fft3bands]
+
+sensor:
+  - platform: fft3bands
+    id: fft3
+    sample_rate: 22050 # 11025 22050 32000 44100 48000
+    fft_size: 512  # 128/256/512/1024
+    update_interval: 50ms
+    ws_pin: GPIO4
+    sck_pin: GPIO3
+    sd_pin: GPIO10
+    band_frequencies: [50 , 125, 250, 1000, 3000, 5000, 7000, 10000]
+    Ganancia: 300
+
+  - platform: internal_temperature
+    name: "Temperatura Chip"
+    update_interval: 30s
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO9
+      mode: INPUT_PULLUP
+      inverted: true
+    name: "Cambiar modo display"
+    on_press:
+      then:
+        - lambda: |-
+            id(display_mode) = (id(display_mode) + 1) % 2;
+        - component.update: my_display
+
+i2c:
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font1
+    size: 8
+
+display:
+  - platform: ssd1306_i2c
+    id: my_display
+    model: "SSD1306 72x40"
+    address: 0x3C
+    update_interval: 50ms
+    contrast: 0.1
+    rotation: 180
+    lambda: |-
+      it.fill(Color::BLACK);
+
+      if (id(display_mode) == 0) {
+        float vu = id(fft3).get_vu_level();
+        float target_norm = powf(vu, 0.75f);
+
+        static float needle_norm = 0.0f;
+        float attack = 0.40f;
+        float release = 0.20f;
+
+        if (target_norm > needle_norm) needle_norm += (target_norm - needle_norm) * attack;
+        else needle_norm += (target_norm - needle_norm) * release;
+
+        const int cx = 36;
+        const int cy = 39;
+        const int needle_len = 40;
+        const float start_deg = -180.0f;
+        const float end_deg = 0.0f;
+
+        float angle_deg = start_deg + needle_norm * (end_deg - start_deg);
+        float angle_rad = angle_deg * 3.1415926f / 180.0f;
+
+        int x2 = cx + (int) (needle_len * cosf(angle_rad));
+        int y2 = cy + (int) (needle_len * sinf(angle_rad));
+
+        for (int i = 0; i <= 8; i++) {
+          float m = i / 8.0f;
+          float mark_deg = start_deg + m * (end_deg - start_deg);
+          float mark_rad = mark_deg * 3.1415926f / 180.0f;
+          int r1 = 33;
+          int r2 = 39;
+          int x1 = cx + (int) (r1 * cosf(mark_rad));
+          int y1 = cy + (int) (r1 * sinf(mark_rad));
+          int xm = cx + (int) (r2 * cosf(mark_rad));
+          int ym = cy + (int) (r2 * sinf(mark_rad));
+          it.line(x1, y1, xm, ym, Color::WHITE);
+        }
+
+        int xx0 = cx, yy0 = cy, xx1 = x2, yy1 = y2;
+        int thickness = 7;
+        float dx = xx1 - xx0;
+        float dy = yy1 - yy0;
+        float len = sqrtf(dx * dx + dy * dy);
+        if (len < 1.0f) len = 1.0f;
+        float nx = -dy / len;
+        float ny = dx / len;
+
+        for (int offset = -(thickness / 2); offset <= thickness / 2; ++offset) {
+          int ox = (int) (offset * nx);
+          int oy = (int) (offset * ny);
+          it.line(xx0 + ox, yy0 + oy, xx1 + ox, yy1 + oy, Color::WHITE);
+        }
+      } else {
+        const int screen_w = 72;
+        const int base_y = 39;
+        //const int top_y = 12;
+        const int top_y = 1;
+        const int usable_h = base_y - top_y;
+        const int gap = 1;
+        int count = (int) id(fft3).get_band_count();
+        if (count < 1) return;
+
+        int total_gap = gap * (count - 1);
+        int bar_w = (screen_w - total_gap) / count;
+        if (bar_w < 1) bar_w = 1;
+
+        int used_w = bar_w * count + total_gap;
+        int x0 = (screen_w - used_w) / 2;
+
+        for (int i = 0; i < count; i++) {
+          float b = id(fft3).get_band(i);
+          if (b < 0.0f) b = 0.0f;
+          if (b > 1.0f) b = 1.0f;
+          //float v = b * b * b;
+          float v = b;
+          int h = (int) (v * usable_h);
+          if (h < 0) h = 0;
+          if (h > usable_h) h = usable_h;
+
+          int x = x0 + i * (bar_w + gap);
+          it.filled_rectangle(x, base_y - h, bar_w, h, Color::WHITE);
+        }
+
+        it.line(0, base_y, screen_w - 1, base_y, Color::WHITE);
+      }
